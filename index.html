@@ -1,0 +1,1299 @@
+<!DOCTYPE html>
+<html lang="tr" class="h-full bg-slate-900 text-slate-100">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Akaid ve Din Bilgisi Yarışması</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Amiri:ital,wght@0,700;1,400&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Canvas Confetti -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
+    <!-- Firebase: Bu oyunun skorları scores2 alanına kaydedilir -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+    <script>
+        window.globalScoresList = [];
+        window.isLeaderboardModalOpen = false;
+        let leaderboardDb = null;
+        let firebaseReady = false;
+        let pendingScores = [];
+        const SCORE_PATH = 'scores3';
+        const currentUserId = (() => {
+            try {
+                let id = localStorage.getItem('fikih_oyun_2_dev_id');
+                if (!id) {
+                    id = 'user_' + Math.random().toString(36).slice(2, 11);
+                    localStorage.setItem('fikih_oyun_2_dev_id', id);
+                }
+                return id;
+            } catch (e) {
+                return 'user_' + Math.random().toString(36).slice(2, 11);
+            }
+        })();
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyCue6mlwd7CotsHvQOhRnLXDkkUWQ395NE",
+            authDomain: "kissa-kesfi-oyun.firebaseapp.com",
+            databaseURL: "https://kissa-kesfi-oyun-default-rtdb.firebaseio.com",
+            projectId: "kissa-kesfi-oyun",
+            storageBucket: "kissa-kesfi-oyun.firebasestorage.app",
+            messagingSenderId: "467061620958",
+            appId: "1:467061620958:web:7657b41f1120f1985e824f",
+            measurementId: "G-0FD3RL05L0"
+        };
+
+        function localDateKey(date = new Date()) {
+            const y = date.getFullYear();
+            const m = String(date.getMonth() + 1).padStart(2, '0');
+            const d = String(date.getDate()).padStart(2, '0');
+            return `${y}-${m}-${d}`;
+        }
+
+        function mergeScoresList(newScores) {
+            if (!Array.isArray(newScores)) return;
+            const map = new Map();
+            [...window.globalScoresList, ...newScores].forEach(item => {
+                if (item && item.name && item.score !== undefined) {
+                    const key = item.id || `${item.uid}_${item.timestamp}`;
+                    map.set(key, item);
+                }
+            });
+            window.globalScoresList = Array.from(map.values()).sort((a, b) => Number(b.score) - Number(a.score));
+            if (window.isLeaderboardModalOpen && typeof window.renderLeaderboardTable === 'function') {
+                window.renderLeaderboardTable();
+            }
+        }
+
+        function saveEntryToFirebase(entry) {
+            if (!leaderboardDb || !firebaseReady) {
+                pendingScores.push(entry);
+                return;
+            }
+            leaderboardDb.ref(SCORE_PATH).push(entry).catch(error => {
+                console.error('Skor kaydedilemedi:', error);
+            });
+        }
+
+        function initLiveLeaderboardSync() {
+            try {
+                if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+                leaderboardDb = firebase.database();
+                firebase.auth().signInAnonymously().then(() => {
+                    firebaseReady = true;
+                    leaderboardDb.ref(SCORE_PATH).on('value', snapshot => {
+                        const scores = [];
+                        snapshot.forEach(child => scores.push({ ...child.val(), id: child.key }));
+                        mergeScoresList(scores);
+                    }, error => console.error('Skorlar okunamadı:', error));
+                    const queued = pendingScores.splice(0);
+                    queued.forEach(saveEntryToFirebase);
+                }).catch(error => {
+                    console.error('Firebase giriş hatası:', error);
+                });
+            } catch (e) { console.error('Firebase başlatılamadı:', e); }
+        }
+
+        window.saveScoreToCloud = function(name, scoreVal, correct, total, mode) {
+            const now = new Date();
+            const newEntry = {
+                uid: currentUserId,
+                name: String(name || 'Öğrenci').slice(0, 25),
+                score: Number(scoreVal) || 0,
+                correct: `${correct}/${total}`,
+                mode: mode === 'test' ? 'Süreli Test' : 'Bilgi Kartı',
+                timestamp: Date.now(),
+                dateKey: localDateKey(now),
+                dateStr: now.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+            };
+            saveEntryToFirebase(newEntry);
+        };
+
+        window.clearCloudLeaderboard = function() {
+            alert('Skor tablosunu temizlemek için Firebase Console kullanın.');
+        };
+
+        window.addEventListener('DOMContentLoaded', initLiveLeaderboardSync);
+    </script>
+
+    <script>
+        if (!window.globalScoresList) {
+            window.globalScoresList = [];
+        }
+        window.isLeaderboardModalOpen = false;
+        window.activeLeaderboardTab = 'daily';
+
+        function getLeaderboard() {
+            const allScores = window.globalScoresList || [];
+            if (window.activeLeaderboardTab === 'daily') {
+                const now = new Date();
+                const todayKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+                return allScores.filter(item => item.dateKey === todayKey);
+            }
+            return allScores;
+        }
+
+        function setLeaderboardTab(tab) {
+            window.activeLeaderboardTab = tab;
+            const btnDaily = document.getElementById('tabDailyBtn');
+            const btnAll = document.getElementById('tabAllBtn');
+            
+            if (tab === 'daily') {
+                btnDaily.className = "px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-bold text-xs shadow-md transition-colors";
+                btnAll.className = "px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition-colors";
+            } else {
+                btnAll.className = "px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-bold text-xs shadow-md transition-colors";
+                btnDaily.className = "px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition-colors";
+            }
+            renderLeaderboardTable();
+        }
+
+        function saveScoreToLeaderboard(name, scoreVal, correct, total, mode) {
+            if (typeof window.saveScoreToCloud === 'function') {
+                window.saveScoreToCloud(name, scoreVal, correct, total, mode);
+            }
+        }
+
+        function renderLeaderboardTable() {
+            const list = getLeaderboard();
+            const tbody = document.getElementById('leaderboardTableBody');
+            const noMsg = document.getElementById('noLeaderboardMsg');
+            tbody.innerHTML = '';
+
+            if (!list || list.length === 0) {
+                noMsg.classList.remove('hidden');
+                return;
+            }
+
+            noMsg.classList.add('hidden');
+
+            list.slice(0, 30).forEach((item, index) => {
+                const tr = document.createElement('tr');
+                tr.className = index % 2 === 0 ? 'bg-slate-900/60' : 'bg-slate-800/40';
+
+                let medal = `${index + 1}`;
+                if (index === 0) medal = `<i class="fa-solid fa-medal text-amber-400 text-base"></i>`;
+                else if (index === 1) medal = `<i class="fa-solid fa-medal text-slate-300 text-base"></i>`;
+                else if (index === 2) medal = `<i class="fa-solid fa-medal text-amber-600 text-base"></i>`;
+
+                tr.innerHTML = `
+                    <td class="py-3 px-3 font-bold text-center">${medal}</td>
+                    <td class="py-3 px-3 font-bold text-white flex items-center space-x-1.5">
+                        <span>${item.name}</span>
+                        ${index === 0 ? '<span class="text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded border border-amber-500/30">1. Sıra</span>' : ''}
+                    </td>
+                    <td class="py-3 px-3 font-extrabold text-amber-300">${item.score}</td>
+                    <td class="py-3 px-3 text-emerald-400 font-semibold">${item.correct}</td>
+                    <td class="py-3 px-3 text-slate-400">${item.mode || 'Test'}</td>
+                    <td class="py-3 px-3 text-slate-500 text-[11px]">${item.dateStr || ''}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        window.renderLeaderboardTable = renderLeaderboardTable;
+
+        function openLeaderboardModal() {
+            window.isLeaderboardModalOpen = true;
+            renderLeaderboardTable();
+            document.getElementById('leaderboardModal').classList.remove('hidden');
+        }
+
+        function closeLeaderboardModal() {
+            window.isLeaderboardModalOpen = false;
+            document.getElementById('leaderboardModal').classList.add('hidden');
+        }
+
+        tailwind = {
+            config: {
+                theme: {
+                    extend: {
+                        colors: {
+                            slate: { 850: '#131f37' }
+                        }
+                    }
+                }
+            }
+        };
+    </script>
+    <style>
+        .custom-glow { box-shadow: 0 0 25px -5px rgba(16, 185, 129, 0.3); }
+        .card-flip { perspective: 1000px; }
+        .card-inner { transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1); transform-style: preserve-3d; }
+        .card-inner.flipped { transform: rotateY(180deg); }
+        .card-front, .card-back { backface-visibility: hidden; }
+        .card-back { transform: rotateY(180deg); }
+        .bg-pattern {
+            background-color: #0f172a;
+            background-image: radial-gradient(rgba(16, 185, 129, 0.15) 1px, transparent 1px);
+            background-size: 24px 24px;
+        }
+        .timer-ring-circle {
+            transition: stroke-dashoffset 0.1s linear;
+            transform: rotate(-90deg);
+            transform-origin: 50% 50%;
+        }
+    </style>
+</head>
+<body class="h-full flex flex-col justify-between bg-pattern font-sans antialiased selection:bg-emerald-500 selection:text-white">
+
+    <!-- Header / Navbar -->
+    <header class="w-full border-b border-emerald-800/40 bg-slate-900/80 backdrop-blur-md sticky top-0 z-50">
+        <div class="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
+            <div class="flex items-center space-x-3 cursor-pointer" onclick="resetToHome()">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-400 flex items-center justify-center text-slate-950 font-bold text-xl shadow-lg shadow-emerald-500/20">
+                    <i class="fa-solid fa-book-open"></i>
+                </div>
+                <div>
+                    <h1 class="font-extrabold text-lg sm:text-xl text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 via-teal-200 to-amber-300">
+                        Akaid Keşfi
+                    </h1>
+                    <p class="text-xs text-slate-400 font-medium hidden sm:block">Temel İnanç Esasları Yarışması</p>
+                </div>
+            </div>
+
+            <div class="flex items-center space-x-3">
+                <button onclick="openLeaderboardModal()" class="p-2.5 rounded-lg bg-slate-800 border border-slate-700 text-amber-300 hover:text-amber-200 hover:border-amber-500 transition-colors flex items-center space-x-1.5 text-xs font-bold" title="Skor Tablosu">
+                    <i class="fa-solid fa-trophy text-amber-400"></i>
+                    <span class="hidden sm:inline">Skor Tablosu</span>
+                </button>
+                <button id="soundToggleBtn" onclick="toggleSound()" class="p-2.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:text-emerald-400 hover:border-emerald-500 transition-colors" title="Ses Aç/Kapat">
+                    <i id="soundIcon" class="fa-solid fa-volume-high"></i>
+                </button>
+                <div class="bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700/80 flex items-center space-x-2">
+                    <i class="fa-solid fa-star text-amber-400 text-sm"></i>
+                    <span id="globalScoreText" class="font-bold text-amber-300 text-sm">0 Puan</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="flex-grow max-w-4xl w-full mx-auto px-4 py-6 flex flex-col justify-center">
+
+        <!-- WELCOME SCREEN -->
+        <section id="welcomeScreen" class="space-y-6 text-center animate-fade-in">
+            <div class="inline-flex items-center space-x-2 px-4 py-1.5 rounded-full bg-emerald-950/80 border border-emerald-500/30 text-emerald-300 text-xs sm:text-sm font-semibold mb-2">
+                <i class="fa-solid fa-sparkles text-amber-400"></i>
+                <span>35 Soruluk Tam Akaid Müfredatı</span>
+            </div>
+
+            <div class="space-y-3">
+                <h2 class="text-3xl sm:text-5xl font-black text-white tracking-tight leading-tight">
+                    İlmin Işığında <br class="hidden sm:inline"/>
+                    <span class="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-amber-300">Akaidi Keşfet</span>
+                </h2>
+                <p class="text-slate-300 max-w-xl mx-auto text-sm sm:text-base leading-relaxed">
+                    Tevhid, Akaid, Kelime-i Tevhid'in şartları ve Tağut kavramlarını dengeli sorularla test edin!
+                </p>
+            </div>
+
+            <!-- Player Name Input -->
+            <div class="bg-slate-800/90 border border-slate-700 rounded-2xl p-5 max-w-xl mx-auto text-left space-y-3 shadow-xl">
+                <div class="flex items-center justify-between">
+                    <label for="playerNameInput" class="block text-sm font-bold text-slate-200 flex items-center space-x-2">
+                        <i class="fa-solid fa-user-pen text-emerald-400"></i>
+                        <span>Oyuncu Adı / İsminiz: <span class="text-rose-400">*</span></span>
+                    </label>
+                </div>
+
+                <div class="space-y-2">
+                    <div class="relative">
+                        <input type="text" id="playerNameInput" placeholder="İsminizi yazınız..." maxlength="25" class="w-full bg-slate-900 border border-slate-600 focus:border-emerald-500 rounded-xl px-4 py-3 text-slate-100 font-semibold placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 text-sm transition-all" />
+                        <div id="nameErrorMsg" class="hidden text-xs text-rose-400 mt-1 font-medium flex items-center space-x-1">
+                            <i class="fa-solid fa-triangle-exclamation"></i>
+                            <span>Lütfen yarışmaya başlamadan önce buraya isminizi yazınız.</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Timer Config -->
+            <div class="bg-slate-800/80 border border-slate-700 rounded-2xl p-4 max-w-xl mx-auto text-left space-y-3">
+                <div class="flex items-center justify-between">
+                    <label class="text-sm font-bold text-slate-200 flex items-center space-x-2">
+                        <i class="fa-solid fa-stopwatch text-amber-400"></i>
+                        <span>Soru Başı Süre Limiti (Çoktan Seçmeli):</span>
+                    </label>
+                    <span id="timerValLabel" class="text-sm font-extrabold text-amber-300 bg-amber-500/10 px-2.5 py-0.5 rounded-md border border-amber-500/20">20 Saniye</span>
+                </div>
+                <div class="grid grid-cols-4 gap-2">
+                    <button onclick="setTimerDuration(10)" class="time-opt-btn py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs font-bold border border-slate-600 transition-all text-slate-300" data-time="10">10 Sn</button>
+                    <button onclick="setTimerDuration(15)" class="time-opt-btn py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs font-bold border border-slate-600 transition-all text-slate-300" data-time="15">15 Sn</button>
+                    <button onclick="setTimerDuration(20)" class="time-opt-btn py-2 rounded-lg bg-emerald-600 text-white text-xs font-bold border border-emerald-400 transition-all shadow-md shadow-emerald-500/20" data-time="20">20 Sn</button>
+                    <button onclick="setTimerDuration(30)" class="time-opt-btn py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs font-bold border border-slate-600 transition-all text-slate-300" data-time="30">30 Sn</button>
+                </div>
+            </div>
+
+            <!-- Game Mode Buttons -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl mx-auto pt-2">
+                <div onclick="startGame('test')" class="group relative bg-slate-800/90 hover:bg-slate-800 border border-slate-700 hover:border-emerald-500/80 rounded-2xl p-6 text-left transition-all duration-300 transform hover:-translate-y-1 cursor-pointer custom-glow">
+                    <div class="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center justify-center text-2xl mb-4 group-hover:scale-110 transition-transform">
+                        <i class="fa-solid fa-clock-rotate-left"></i>
+                    </div>
+                    <h3 class="text-lg font-bold text-white group-hover:text-emerald-300 transition-colors">Süreli Çoktan Seçmeli Test</h3>
+                    <p class="text-slate-400 text-xs sm:text-sm mt-1">Zamana karşı yarış! Eşit uzunluktaki şıklardan doğru olanı hızlıca bul.</p>
+                    <div class="mt-4 flex items-center text-xs font-semibold text-emerald-400 group-hover:translate-x-1 transition-transform">
+                        <span>Süreli Teste Başla</span>
+                        <i class="fa-solid fa-arrow-right ml-2"></i>
+                    </div>
+                </div>
+
+                <div onclick="startGame('card')" class="group relative bg-slate-800/90 hover:bg-slate-800 border border-slate-700 hover:border-amber-500/80 rounded-2xl p-6 text-left transition-all duration-300 transform hover:-translate-y-1 cursor-pointer">
+                    <div class="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 flex items-center justify-center text-2xl mb-4 group-hover:scale-110 transition-transform">
+                        <i class="fa-solid fa-layer-group"></i>
+                    </div>
+                    <h3 class="text-lg font-bold text-white group-hover:text-amber-300 transition-colors">Süreli Bilgi Kartları (60 Sn)</h3>
+                    <p class="text-slate-400 text-xs sm:text-sm mt-1">Her kart için 60 saniyelik süreniz var! Cevabı düşünün ve kartı çevirin.</p>
+                    <div class="mt-4 flex items-center text-xs font-semibold text-amber-400 group-hover:translate-x-1 transition-transform">
+                        <span>Kart Modunu Başlat</span>
+                        <i class="fa-solid fa-arrow-right ml-2"></i>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- GAMEPLAY SCREEN -->
+        <section id="gameplayScreen" class="hidden space-y-5 animate-fade-in">
+            <div class="bg-slate-800/90 border border-slate-700/80 rounded-2xl p-4 flex items-center justify-between shadow-lg">
+                <div class="flex items-center space-x-3">
+                    <span class="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 font-bold flex items-center justify-center text-sm border border-emerald-500/30" id="currentQNum">1</span>
+                    <div>
+                        <div class="text-xs text-slate-400" id="playerDisplayName">Oyuncu</div>
+                        <div class="text-sm font-bold text-white"><span id="progressText">1</span> / <span id="totalQText">35</span> Soru</div>
+                    </div>
+                </div>
+
+                <div id="timerContainer" class="flex items-center space-x-2 bg-slate-900/80 px-3 py-1.5 rounded-xl border border-slate-700">
+                    <div class="relative w-8 h-8 flex items-center justify-center">
+                        <svg class="w-full h-full">
+                            <circle class="text-slate-700" stroke-width="3" stroke="currentColor" fill="transparent" r="13" cx="16" cy="16"/>
+                            <circle id="timerCircle" class="timer-ring-circle text-amber-400" stroke-width="3" stroke-linecap="round" stroke="currentColor" fill="transparent" r="13" cx="16" cy="16" stroke-dasharray="81.68" stroke-dashoffset="0"/>
+                        </svg>
+                        <span id="timerText" class="absolute text-xs font-black text-amber-300">20</span>
+                    </div>
+                    <span class="text-xs font-semibold text-slate-300 hidden sm:inline">Kalan Süre</span>
+                </div>
+
+                <div class="hidden sm:flex items-center space-x-2 bg-amber-500/10 border border-amber-500/20 px-3 py-1 rounded-full">
+                    <i class="fa-solid fa-fire text-amber-400 text-sm"></i>
+                    <span class="text-xs font-bold text-amber-300">Seri: <span id="comboCount">0</span>x</span>
+                </div>
+
+                <div class="flex items-center space-x-3">
+                    <div class="text-right">
+                        <div class="text-xs text-slate-400">Mevcut Puan</div>
+                        <div class="text-base font-extrabold text-emerald-400" id="currentScore">0</div>
+                    </div>
+                    <button onclick="confirmExit()" class="p-2 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-700/50 transition-colors">
+                        <i class="fa-solid fa-xmark text-lg"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div class="w-full bg-slate-800 rounded-full h-2.5 overflow-hidden border border-slate-700/50">
+                <div id="progressBar" class="bg-gradient-to-r from-emerald-500 to-teal-300 h-2.5 rounded-full transition-all duration-300" style="width: 4%"></div>
+            </div>
+
+            <!-- Test Mode Container -->
+            <div id="testQuestionContainer" class="bg-slate-800/90 border border-slate-700 rounded-2xl p-6 sm:p-8 space-y-6 shadow-xl relative overflow-hidden">
+                <div class="space-y-3">
+                    <div id="questionCategory" class="inline-block px-3 py-1 rounded-md bg-emerald-950 text-emerald-400 text-xs font-semibold tracking-wider border border-emerald-800">
+                        SORU 1
+                    </div>
+                    <h3 id="questionText" class="text-lg sm:text-xl md:text-2xl font-bold text-white leading-snug">
+                        Soru yükleniyor...
+                    </h3>
+                </div>
+
+                <div id="optionsContainer" class="grid grid-cols-1 gap-3 pt-2"></div>
+
+                <div id="feedbackBanner" class="hidden p-4 rounded-xl border flex items-center justify-between transition-all">
+                    <div class="flex items-center space-x-3">
+                        <i id="feedbackIcon" class="text-2xl"></i>
+                        <div>
+                            <h4 id="feedbackTitle" class="font-bold text-sm"></h4>
+                            <p id="feedbackDetail" class="text-xs opacity-90"></p>
+                        </div>
+                    </div>
+                    <button onclick="nextQuestion()" class="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 font-bold text-xs flex items-center space-x-1.5 transition-colors">
+                        <span>Sonraki Soru</span>
+                        <i class="fa-solid fa-arrow-right"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Card Mode Container -->
+            <div id="cardQuestionContainer" class="hidden space-y-6">
+                <div class="flex items-center justify-between bg-slate-800/80 px-4 py-2 rounded-xl border border-slate-700">
+                    <div class="flex items-center space-x-2">
+                        <i class="fa-solid fa-ticket text-amber-400"></i>
+                        <span class="text-xs font-bold text-slate-200">Kalan Pas Hakkı:</span>
+                        <span id="passCountText" class="text-xs font-black text-amber-300 bg-amber-500/20 px-2 py-0.5 rounded border border-amber-500/30">3 Pas</span>
+                    </div>
+                    <button id="passCardBtn" onclick="usePassCard()" class="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-bold text-xs flex items-center space-x-1.5">
+                        <i class="fa-solid fa-forward"></i>
+                        <span>Pas Geç</span>
+                    </button>
+                </div>
+
+                <div class="card-flip w-full min-h-[300px] cursor-pointer" onclick="flipCard()">
+                    <div id="flashCardInner" class="card-inner relative w-full h-full rounded-2xl border border-slate-700 bg-slate-800 shadow-xl p-8 flex flex-col justify-between min-h-[300px]">
+                        <div class="card-front absolute inset-0 p-6 flex flex-col justify-between bg-slate-800 rounded-2xl">
+                            <div class="flex justify-between items-center">
+                                <span class="px-3 py-1 rounded-md bg-amber-950 text-amber-400 text-xs font-semibold border border-amber-800">Bilgi Kartı</span>
+                                <span class="text-xs text-slate-400">Çevir ve Cevabı Gör</span>
+                            </div>
+                            <div class="my-auto py-4">
+                                <h3 id="cardQuestionText" class="text-lg sm:text-2xl font-bold text-white text-center leading-relaxed">
+                                    Soru yükleniyor...
+                                </h3>
+                            </div>
+                            <div class="text-center text-xs text-slate-400 italic">Dokun veya tıkla: Doğru Cevabı Gör</div>
+                        </div>
+
+                        <div class="card-back absolute inset-0 p-6 flex flex-col justify-between bg-slate-850 rounded-2xl border-2 border-emerald-500/50">
+                            <div class="flex justify-between items-center">
+                                <span class="px-3 py-1 rounded-md bg-emerald-950 text-emerald-400 text-xs font-semibold border border-emerald-800">Doğru Cevap</span>
+                                <span class="text-xs text-slate-400">Açıklandı</span>
+                            </div>
+                            <div class="my-auto py-4">
+                                <p id="cardAnswerText" class="text-base sm:text-lg text-emerald-200 text-center font-medium leading-relaxed">
+                                    Cevap yükleniyor...
+                                </p>
+                            </div>
+                            <div class="text-center text-xs text-slate-400">Kendini değerlendir ↓</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="cardEvaluationBtns" class="opacity-50 pointer-events-none transition-opacity grid grid-cols-2 gap-4">
+                    <button onclick="rateCard(false)" class="py-3 px-4 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/40 text-rose-300 font-bold text-sm">Bilemedim / Yanlış</button>
+                    <button onclick="rateCard(true)" class="py-3 px-4 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-bold text-sm">Bildim (+100 Puan)</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- RESULT SCREEN -->
+        <section id="resultScreen" class="hidden space-y-6 text-center animate-fade-in">
+            <div class="bg-slate-800/90 border border-slate-700 rounded-2xl p-6 sm:p-8 space-y-6 shadow-2xl relative overflow-hidden max-w-3xl mx-auto">
+                <div class="w-20 h-20 mx-auto rounded-full bg-gradient-to-tr from-amber-400 to-emerald-400 p-1 shadow-lg shadow-amber-500/20">
+                    <div class="w-full h-full bg-slate-900 rounded-full flex items-center justify-center text-4xl text-amber-400">
+                        <i class="fa-solid fa-trophy"></i>
+                    </div>
+                </div>
+
+                <div>
+                    <h2 class="text-3xl font-black text-white">Tebrikler <span id="resultPlayerName" class="text-amber-300">Oyuncu</span>!</h2>
+                    <p class="text-slate-300 text-sm mt-1">35 soruluk Akaid Bilgi Yarışmasını başarıyla tamamladınız.</p>
+                </div>
+
+                <div class="grid grid-cols-3 gap-3 bg-slate-900/80 p-4 rounded-xl border border-slate-700/70">
+                    <div class="space-y-1">
+                        <div class="text-xs text-slate-400">Toplam Puan</div>
+                        <div id="finalScore" class="text-xl sm:text-2xl font-extrabold text-amber-400">0</div>
+                    </div>
+                    <div class="space-y-1 border-x border-slate-800">
+                        <div class="text-xs text-slate-400">Doğru Sayısı</div>
+                        <div id="finalCorrect" class="text-xl sm:text-2xl font-extrabold text-emerald-400">0 / 35</div>
+                    </div>
+                    <div class="space-y-1">
+                        <div class="text-xs text-slate-400">Başarı Oranı</div>
+                        <div id="finalAccuracy" class="text-xl sm:text-2xl font-extrabold text-teal-300">%0</div>
+                    </div>
+                </div>
+
+                <div id="badgeContainer" class="p-4 rounded-xl bg-emerald-950/60 border border-emerald-500/30 flex items-center space-x-4 text-left">
+                    <div class="text-3xl text-amber-400 shrink-0" id="badgeIcon"><i class="fa-solid fa-award"></i></div>
+                    <div>
+                        <h4 id="badgeTitle" class="font-bold text-emerald-300 text-sm">Akaid Âlimi</h4>
+                        <p id="badgeDesc" class="text-xs text-slate-300 mt-0.5">Tevhid esaslarını harika şekilde kavradınız!</p>
+                    </div>
+                </div>
+
+                <div class="pt-2">
+                    <button onclick="toggleAnswerReview()" class="w-full py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-950 border border-slate-700 text-slate-300 text-xs font-bold flex items-center justify-center space-x-2">
+                        <i class="fa-solid fa-list-ol"></i>
+                        <span>Tüm Soruları ve Cevapları İncele</span>
+                    </button>
+                    <div id="reviewContainer" class="hidden mt-4 space-y-3 text-left max-h-80 overflow-y-auto pr-2 bg-slate-900/50 p-4 rounded-xl border border-slate-800"></div>
+                </div>
+
+                <div class="flex flex-col sm:flex-row gap-3 pt-2">
+                    <button onclick="openLeaderboardModal()" class="flex-1 py-3 px-4 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold text-sm">Skor Tablosu</button>
+                    <button onclick="resetToHome()" class="flex-1 py-3 px-4 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-bold text-sm">Ana Menü</button>
+                    <button onclick="restartGame()" class="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-extrabold text-sm">Yeniden Oyna</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- LEADERBOARD MODAL -->
+        <div id="leaderboardModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+            <div class="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+                <div class="px-6 py-4 border-b border-slate-800 bg-slate-850 flex items-center justify-between">
+                    <div class="flex items-center space-x-2">
+                        <i class="fa-solid fa-trophy text-amber-400 text-xl"></i>
+                        <h3 class="font-extrabold text-lg text-white">Skor Tablosu</h3>
+                    </div>
+                    <div class="flex items-center space-x-1.5 bg-slate-900 p-1 rounded-xl border border-slate-800">
+                        <button id="tabDailyBtn" onclick="setLeaderboardTab('daily')" class="px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-bold text-xs">Bugün</button>
+                        <button id="tabAllBtn" onclick="setLeaderboardTab('all')" class="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 font-bold text-xs">Tüm Zamanlar</button>
+                    </div>
+                    <button onclick="closeLeaderboardModal()" class="p-2 text-slate-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
+                </div>
+                <div class="p-6 overflow-y-auto flex-grow space-y-4">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-xs sm:text-sm text-slate-300">
+                            <thead class="bg-slate-800/80 text-amber-300 uppercase text-[11px] font-bold">
+                                <tr>
+                                    <th class="py-3 px-3">Sıra</th>
+                                    <th class="py-3 px-3">Oyuncu</th>
+                                    <th class="py-3 px-3">Puan</th>
+                                    <th class="py-3 px-3">Doğru</th>
+                                    <th class="py-3 px-3">Mod</th>
+                                    <th class="py-3 px-3">Tarih</th>
+                                </tr>
+                            </thead>
+                            <tbody id="leaderboardTableBody" class="divide-y divide-slate-800"></tbody>
+                        </table>
+                    </div>
+                    <div id="noLeaderboardMsg" class="hidden text-center py-8 text-slate-500 text-xs">Seçili filtreye ait skor bulunmuyor.</div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="w-full border-t border-slate-800 py-4 bg-slate-950/60 text-center text-xs text-slate-500">
+        <p>Akaid Eğitim Oyunu • Denge Korumalı 35 Soruluk Set</p>
+    </footer>
+
+    <!-- Audio Effects -->
+    <script>
+        let soundEnabled = true;
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+        function playSound(type) {
+            if (!soundEnabled) return;
+            try {
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+
+                if (type === 'correct') {
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(523.25, audioCtx.currentTime);
+                    osc.frequency.setValueAtTime(659.25, audioCtx.currentTime + 0.1);
+                    gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+                    osc.start();
+                    osc.stop(audioCtx.currentTime + 0.3);
+                } else if (type === 'wrong') {
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(220, audioCtx.currentTime);
+                    osc.frequency.setValueAtTime(164.81, audioCtx.currentTime + 0.15);
+                    gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+                    osc.start();
+                    osc.stop(audioCtx.currentTime + 0.3);
+                }
+            } catch (e) {}
+        }
+
+        function toggleSound() {
+            soundEnabled = !soundEnabled;
+            document.getElementById('soundIcon').className = soundEnabled ? "fa-solid fa-volume-high" : "fa-solid fa-volume-xmark text-rose-400";
+        }
+    </script>
+
+    <!-- 35 DENGELİ AKAİD SORU SETİ -->
+    <script>
+        const questionsData = [
+            {
+                id: 1,
+                question: "Peygamber Efendimiz (s.a.v.) ilim öğrenen kimse için hangisini müjdelemiştir?",
+                correct: "Allah ona cennete giden yolu kolaylaştırır.",
+                distractors: [
+                    "Dünyada ona krallık ve büyük mal ihsan eder.",
+                    "Sadece meleklerin ona dua etmesini sağlar.",
+                    "Geçmiş kavimlerin tüm gizemlerini açığa çıkarır."
+                ]
+            },
+            {
+                id: 2,
+                question: "Akaid kelimesinin kökeni olan 'A-ka-de' ne anlama gelmektedir?",
+                correct: "Bir şeyi ip düğümler gibi sıkıca bağlamaktır.",
+                distractors: [
+                    "İnsanlarla güzel ve yumuşak şekilde konuşmaktır.",
+                    "Geçmişte yaşanan olayları zihinde ezberlemektir.",
+                    "Toplumsal kuralları düzenleyip yasalar yazmaktır."
+                ]
+            },
+            {
+                id: 3,
+                question: "Akaid ilminin şer'i (dinî) tanımı aşağıdakilerden hangisidir?",
+                correct: "Kişinin inanmak veya reddetmek zorunda olduğu din esaslarını inceleyen ilimdir.",
+                distractors: [
+                    "İbadetlerin şekilsel şartlarını ve temizlik kurallarını anlatan ilimdir.",
+                    "Peygamberlerin kronolojik hayatını ve savaşlarını inceleyen bilimdir.",
+                    "Toplumlar arası hukuki anlaşmazlıkları çözen ceza ilmidir."
+                ]
+            },
+            {
+                id: 4,
+                question: "Akide hakkında verilen bilgilerden hangisi DOĞRUDUR?",
+                correct: "Vahye ve muhkem delillere dayandığı için zamanla veya kişilere göre değişmez.",
+                distractors: [
+                    "Her yüzyılda toplumun ve kültürün değişmesiyle yenilenir.",
+                    "Mezhep imamlarının şahsi görüşlerine göre şekil alır.",
+                    "Geçici bilimsel teorilere göre güncellenmek zorundadır."
+                ]
+            },
+            {
+                id: 5,
+                question: "Kelime-i Tevhid'deki 'Lâ İlahe' (Nefiy) kısmı neyi ifade eder?",
+                correct: "Allah dışındaki tüm sahte ilahları ve otoriteleri reddetmeyi.",
+                distractors: [
+                    "Allah'ın tek yaratıcı olduğunu kalben kabul etmeyi.",
+                    "Namaz kılmadan önce niyet edip abdest almayı.",
+                    "Ahiret gününe, kitaplara ve peygamberlere iman etmeyi."
+                ]
+            },
+            {
+                id: 6,
+                question: "Kelime-i Tevhid'deki 'İllallah' (İspat) kısmı neyi ifade eder?",
+                correct: "Tüm sahte ilahları reddettikten sonra tek ilah olarak Allah'ı kabul etmeyi.",
+                distractors: [
+                    "Meleklerin varlığına ve Allah'ın vahyettiği kitaplara inanmayı.",
+                    "Cennet ve cehennemin varlığını şüphe duymadan onaylamayı.",
+                    "Geçmiş günahlardan samimiyetle tövbe edip bağışlanmayı."
+                ]
+            },
+            {
+                id: 7,
+                question: "Aşağıdakilerden hangisi Cibril Hadisi'nde tanımlanan 3 ana kavramdan biri DEĞİLDİR?",
+                correct: "Fıkıh",
+                distractors: [
+                    "İman",
+                    "İslam",
+                    "İhsan"
+                ]
+            },
+            {
+                id: 8,
+                question: "Cibril Hadisi'nde geçen 'İhsan' kavramının tanımı aşağıdakilerden hangisidir?",
+                correct: "Allah'ı görüyormuşçasına ibadet etmek ve yaşamaktır.",
+                distractors: [
+                    "Fakirlere ve yetimlere karşılıksız mal yardımında bulunmaktır.",
+                    "Günde beş vakit namazı eksiksiz kılmaya devam etmektir.",
+                    "İbadetleri yalnızca Allah için yapmak."
+                ]
+            },
+            {
+                id: 9,
+                question: "Akaid ilmine göre Tevhid'in şer'i tanımı nedir?",
+                correct: "Kişinin Allah'ı birlemesi gereken meselelerde O'nu kalbi ve ameliyle tek kılmasıdır.",
+                distractors: [
+                    "Yalnızca kainatı yaratan gücün Allah olduğunu kalbi ve ameliyle kabul etmektir.",
+                    "Sıkıntı anlarında dualarda Allah'ın ismini zikretmektir.",
+                    "Bütün dinlerin aslında aynı olduğunu savunup kabul etmektir."
+                ]
+            },
+            {
+                id: 10,
+                question: "İnsanın Allah'a ortak koşmada mazeretinin olmadığını gösteren 5 delilden hangisi 'Ruhlar alemindeki sözleşmeyi' ifade eder?",
+                correct: "Misak",
+                distractors: [
+                    "Fıtrat",
+                    "Akıl",
+                    "Peygamberler"
+                ]
+            },
+            {
+                id: 11,
+                question: "İnsanın doğuştan tevhide yatkın yaratılmasını ifade eden delil hangisidir?",
+                correct: "Fıtrat",
+                distractors: [
+                    "Misak",
+                    "Kitaplar",
+                    "Akıl"
+                ]
+            },
+            {
+                id: 12,
+                question: "Aşağıdakilerden hangisi bir amelin ibadet olduğunu anlamanın yollarından biri DEĞİLDİR?",
+                correct: "Toplumun çoğunluğu tarafından yapılması.",
+                distractors: [
+                    "Allah'ın o eylemden razı olduğunun bildirilmesi.",
+                    "Allah'tan başkasına yapıldığında 'şirk' sayılacağının belirtilmesi.",
+                    "Kur'an'da o amelin 'Yalnızca Allah içindir' şeklinde sınırlandırılması."
+                ]
+            },
+            {
+                id: 13,
+                question: "Kur'an-ı Kerim'de ibadetin ta kendisi olduğu belirtilen eylem hangisidir?",
+                correct: "Dua etmek",
+                distractors: [
+                    "Oruç tutmak",
+                    "Ticaret yapmak",
+                    "Safa-Merve arası yürümek"
+                ]
+            },
+            {
+                id: 14,
+                question: "Tevbe Suresi 31. ayete göre helal ve haram koymada Allah'tan başkasını mutlak yetkili kılmak ne sayılır?",
+                correct: "Onları 'rab edinmek' (ibadet etmek) sayılır.",
+                distractors: [
+                    "Küçük bir siyasi hata sayılır.",
+                    "Sadece ahlaki bir kusur kabul edilir.",
+                    "Toplumsal uyumun bir gereği sayılır."
+                ]
+            },
+            {
+                id: 15,
+                question: "İnsanların Allah'tan başkasına dua etmelerindeki ilk temel yanılgı nedir?",
+                correct: "'Bizi Allah'a yakınlaştırsınlar' diye aracı kılmaları.",
+                distractors: [
+                    "Allah'ın duaları duymadığını zannetmeleri.",
+                    "Peygamberleri tanımıyor olmaları.",
+                    "Duaların mektupla gönderileceğini sanmaları."
+                ]
+            },
+            {
+                id: 16,
+                question: "Zümer Suresi 44. ayete göre şefaat yetkisi kime aittir?",
+                correct: "Tamamen Allah'a aittir.",
+                distractors: [
+                    "Türbede yatan yatırlara aittir.",
+                    "Meleklere ve veli kişilere aittir.",
+                    "Din adamlarına aittir."
+                ]
+            },
+            {
+                id: 17,
+                question: "Peygamberlerin davete toplumsal reformlarla değil de 'Lâ ilahe illallah' ile başlamalarının nedeni nedir?",
+                correct: "Zihniyet ve kalbi değiştirerek gerçek ahlakı inşa ettiği için.",
+                distractors: [
+                    "O dönemde hiçbir ahlaki sorun bulunmadığı için.",
+                    "Siyasi liderlerden korktukları için.",
+                    "İnsanların felsefeyi daha çok sevmesi nedeniyle."
+                ]
+            },
+            {
+                id: 18,
+                question: "Bakara 256. ayette Kelime-i Tevhid hangisine benzetilmiştir?",
+                correct: "Kopması mümkün olmayan sapasağlam kulpa.",
+                distractors: [
+                    "Aşılmaz yüksek bir kaleye.",
+                    "Sarsılmaz keskin bir kılıca.",
+                    "Dipsiz derin bir denize."
+                ]
+            },
+            {
+                id: 19,
+                question: "İbrahim Suresi 24-25. ayetlerde Kelime-i Tevhid hangisine benzetilmiştir?",
+                correct: "Kökü sabit, dalları semada olan güzel bir ağaca.",
+                distractors: [
+                    "Akan berrak bir nehre.",
+                    "Geceyi aydınlatan dolunaya.",
+                    "Alev alev yanan güçlü bir ateşe."
+                ]
+            },
+            {
+                id: 20,
+                question: "İmanın yetmiş küsur bölümünün 'en üst' tabakası hangisidir?",
+                correct: "'Allah'tan başka ilah yoktur' sözünü kabul etmektir.",
+                distractors: [
+                    "Yoldaki eziyet veren şeyi kaldırmaktır.",
+                    "Haya ve edep sahibi olmaktır.",
+                    "Anne babaya hürmet etmektir."
+                ]
+            },
+            {
+                id: 21,
+                question: "İmanın en alt şubesi hadis-i şerifte nasıl açıklanmıştır?",
+                correct: "İnsanlara sıkıntı veren bir nesneyi yoldan kaldırmak.",
+                distractors: [
+                    "Güler yüzle selam vermektir.",
+                    "Tüm insanlara sadaka vermektir.",
+                    "Namazlarda uzun süre durmaktır."
+                ]
+            },
+            {
+                id: 22,
+                question: "Mizanda 99 günah siciline galip gelen kartın üzerinde ne yazılıydı?",
+                correct: "Kelime-i Tevhid",
+                distractors: [
+                    "Ayetel Kursi",
+                    "Fatiha Suresi",
+                    "Sübhanke Duası"
+                ]
+            },
+            {
+                id: 23,
+                question: "Kelime-i Tevhid'i söyleyen bir kimsenin dünyada neyi koruma altına alınmış olur?",
+                correct: "Mali ve canı",
+                distractors: [
+                    "Makamı ve rütbesi",
+                    "Gelecekteki tüm soyu",
+                    "Toprakları ve evleri"
+                ]
+            },
+            {
+                id: 24,
+                question: "Uluhiyet kavramının kelime anlamı nedir?",
+                correct: "İlahlık, mabudluk ve ibadet edilmeye layık olma yetkisidir.",
+                distractors: [
+                    "Kainatın haritasını çizip yıldızları yönetmektir.",
+                    "İnsanlar arasında adaletle karar vermektir.",
+                    "Meleklere yön verip mesajlar iletmektir."
+                ]
+            },
+            {
+                id: 25,
+                question: "Aşağıdakilerden hangisi bir varlığın 'gerçek ilah' olması için sahip olması gereken niteliklerden biri DEĞİLDİR?",
+                correct: "Bir başkasına veya soy kütüğüne muhtaç olması.",
+                distractors: [
+                    "Yaratıcı (Hâlık) olması.",
+                    "Sonsuz ilim sahibi (Alîm) olması.",
+                    "Hiçbir şeye muhtaç olmaması (Samed)."
+                ]
+            },
+            {
+                id: 26,
+                question: "Aşağıdakilerden hangisi Kelime-i Tevhid hakkında bilinen YANLIŞLARDAN biridir?",
+                correct: "Mana olarak 'Allah yaratıcıdır' demektir.",
+                distractors: [
+                    "Tağut reddedilmeden tamamlanmayacağını bilmek.",
+                    "Kalben tasdik edilmesi gerektiğini kabul etmek.",
+                    "Hayatın her alanında geçerli olduğunu anlamak."
+                ]
+            },
+            {
+                id: 27,
+                question: "Müşriklerin Kelime-i Tevhid davetine karşı çıkmalarının asıl sebebi nedir?",
+                correct: "Allah'ın kurallarının hayatlarına müdahale etmesini istememeleri.",
+                distractors: [
+                    "Allah'ın yaratıcı olduğuna inanmamaları.",
+                    "Peygamberin mucizelerini görmemiş olmaları.",
+                    "Kendi dillerinde konuşulmaması."
+                ]
+            },
+            {
+                id: 28,
+                question: "Kelime-i Tevhid'in ilk şartı aşağıdakilerden hangisidir?",
+                correct: "Tağutu reddetmektir.",
+                distractors: [
+                    "Hacca gitmektir.",
+                    "Çokça zikir çekmektir.",
+                    "Arapça bilmektir."
+                ]
+            },
+            {
+                id: 29,
+                question: "'Şart' kavramının Usul ilmindeki tanımı aşağıdakilerden hangisidir?",
+                correct: "Şartın yokluğu, şart koşulan şeyin yokluğunu gerektirir.",
+                distractors: [
+                    "Şart varsa yapılan ibadet iki kat sevap kazandırır.",
+                    "Şartın olmaması ibadetin geçerliliğini etkilemez.",
+                    "Şart sadece sünnet olan amellerde aranır."
+                ]
+            },
+            {
+                id: 30,
+                question: "Kur'an perspektifinde 'Tağut' kavramının tanımı nedir?",
+                correct: "Allah'ın sınırlarını aşan sahte otoritelerdir.",
+                distractors: [
+                    "Sadece müzede sergilenen taş heykellerdir.",
+                    "Kötü niyetli ve huysuz insanlardır.",
+                    "Namaz kılmayı unutan kimselerdir."
+                ]
+            },
+            {
+                id: 31,
+                question: "Aklın 'tağutlaşması' durumu ilk kimde görülmüştür?",
+                correct: "İblis'te (Şeytan)",
+                distractors: [
+                    "Firavun'da",
+                    "Nemrut'ta",
+                    "Karun'da"
+                ]
+            },
+            {
+                id: 32,
+                question: "Aklın tağutlaşması ne anlama gelmektedir?",
+                correct: "Şahsi mantığı üste çıkarıp vahyi yargılamaktır.",
+                distractors: [
+                    "İlim tahsil ederken zorlanıp dersleri aksatmaktır.",
+                    "Gelecekle ilgili planlar yapıp kararlar almaktır.",
+                    "Kainattaki düzeni anlamak için düşünmektir."
+                ]
+            },
+            {
+                id: 33,
+                question: "Hz. İbrahim'in teberri (tağutu reddetme) duruşunda ilk aşama nedir?",
+                correct: " Biz sizden beriyiz.",
+                distractors: [
+                    "Allah'ın dışında ibadet ettiklerinizden beriyiz.",
+                    "Aramızda ebedi bir kin ve düşmanlık vardır.",
+                    "Şehri terk edip mağaraya sığınmaktır."
+                ]
+            },
+            {
+                id: 34,
+                question: "Nisa Suresi 60. ayete göre Allah'ın kanunları dururken tağutun kurallarına başvuranların durumu nedir?",
+                correct: "İman iddiaları sadece 'kuru bir zandan' ibarettir.",
+                distractors: [
+                    "İmanları tamdır ama günahkar olurlar.",
+                    "Tevbe ederlerse hemen peygamber olurlar.",
+                    "Sadece toplumsal kurallara uymuş olurlar."
+                ]
+            },
+            {
+                id: 35,
+                question: "Aşağıdakilerden hangisi Tağut'un temel özelliklerinden biri DEĞİLDİR?",
+                correct: "İnsanları vahye ve hakikate yönlendirmesi.",
+                distractors: [
+                    "İlahi olmayan kanunlar koyması.",
+                    "İnsanları karanlıklara sürüklemesi.",
+                    "Mutlak itaat talep ederek ilahlaşması."
+                ]
+            }
+        ];
+
+        let playerName = "";
+        let currentGameMode = 'test'; 
+        let currentQuestionIndex = 0;
+        let score = 0;
+        let streak = 0;
+        let passRights = 3;
+        let correctAnswersCount = 0;
+        let isAnswered = false;
+        let cardFlipped = false;
+
+        let timerDuration = 20;
+        let currentSecondsLeft = 20;
+        let timerInterval = null;
+        let userAnswersLog = [];
+
+        function setTimerDuration(seconds) {
+            timerDuration = seconds;
+            document.getElementById('timerValLabel').innerText = `${seconds} Saniye`;
+            document.querySelectorAll('.time-opt-btn').forEach(btn => {
+                btn.className = parseInt(btn.dataset.time) === seconds 
+                    ? "time-opt-btn py-2 rounded-lg bg-emerald-600 text-white text-xs font-bold border border-emerald-400"
+                    : "time-opt-btn py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs font-bold border border-slate-600 text-slate-300";
+            });
+        }
+
+        function startTimer() {
+            stopTimer();
+            currentSecondsLeft = currentGameMode === 'card' ? 60 : timerDuration;
+            updateTimerUI();
+
+            timerInterval = setInterval(() => {
+                currentSecondsLeft--;
+                updateTimerUI();
+                if (currentSecondsLeft <= 0) {
+                    stopTimer();
+                    handleTimeout();
+                }
+            }, 1000);
+        }
+
+        function stopTimer() {
+            if (timerInterval) {
+                clearInterval(timerInterval);
+                timerInterval = null;
+            }
+        }
+
+        function updateTimerUI() {
+            const timerCircle = document.getElementById('timerCircle');
+            const timerText = document.getElementById('timerText');
+            if (!timerCircle || !timerText) return;
+
+            timerText.innerText = currentSecondsLeft;
+            const maxSecs = currentGameMode === 'card' ? 60 : timerDuration;
+            const fullDash = 81.68;
+            const offset = fullDash - (currentSecondsLeft / maxSecs) * fullDash;
+            timerCircle.style.strokeDashoffset = offset;
+        }
+
+        function shuffleArray(array) {
+            const arr = [...array];
+            for (let i = arr.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [arr[i], arr[j]] = [arr[j], arr[i]];
+            }
+            return arr;
+        }
+
+        let shuffledQuestions = [];
+
+        function startGame(mode) {
+            const nameInput = document.getElementById('playerNameInput');
+            const nameErr = document.getElementById('nameErrorMsg');
+            playerName = nameInput.value.trim();
+
+            if (!playerName) {
+                nameErr.classList.remove('hidden');
+                nameInput.classList.add('border-rose-500');
+                return;
+            }
+
+            nameErr.classList.add('hidden');
+            currentGameMode = mode;
+            currentQuestionIndex = 0;
+            score = 0;
+            streak = 0;
+            passRights = 3;
+            correctAnswersCount = 0;
+            userAnswersLog = [];
+
+            shuffledQuestions = shuffleArray(questionsData);
+
+            document.getElementById('welcomeScreen').classList.add('hidden');
+            document.getElementById('resultScreen').classList.add('hidden');
+            document.getElementById('gameplayScreen').classList.remove('hidden');
+
+            document.getElementById('playerDisplayName').innerText = playerName;
+            document.getElementById('totalQText').innerText = shuffledQuestions.length;
+            document.getElementById('globalScoreText').innerText = `0 Puan`;
+            document.getElementById('currentScore').innerText = `0`;
+            document.getElementById('comboCount').innerText = `0`;
+
+            if (mode === 'test') {
+                document.getElementById('testQuestionContainer').classList.remove('hidden');
+                document.getElementById('cardQuestionContainer').classList.add('hidden');
+            } else {
+                document.getElementById('testQuestionContainer').classList.add('hidden');
+                document.getElementById('cardQuestionContainer').classList.remove('hidden');
+                document.getElementById('passCountText').innerText = `${passRights} Pas`;
+            }
+
+            loadQuestion();
+        }
+
+        function loadQuestion() {
+            if (currentQuestionIndex >= shuffledQuestions.length) {
+                endGame();
+                return;
+            }
+
+            isAnswered = false;
+            cardFlipped = false;
+            const q = shuffledQuestions[currentQuestionIndex];
+
+            const progressPct = ((currentQuestionIndex + 1) / shuffledQuestions.length) * 100;
+            document.getElementById('progressBar').style.width = `${progressPct}%`;
+            document.getElementById('currentQNum').innerText = currentQuestionIndex + 1;
+            document.getElementById('progressText').innerText = currentQuestionIndex + 1;
+
+            if (currentGameMode === 'test') {
+                document.getElementById('questionCategory').innerText = `SORU ${currentQuestionIndex + 1}`;
+                document.getElementById('questionText').innerText = q.question;
+                document.getElementById('feedbackBanner').classList.add('hidden');
+
+                const allOpts = shuffleArray([
+                    { text: q.correct, isCorrect: true },
+                    ...q.distractors.map(d => ({ text: d, isCorrect: false }))
+                ]);
+
+                const container = document.getElementById('optionsContainer');
+                container.innerHTML = '';
+
+                const optLabels = ['A', 'B', 'C', 'D'];
+                allOpts.forEach((opt, idx) => {
+                    const btn = document.createElement('button');
+                    btn.className = "w-full p-4 rounded-xl bg-slate-900/80 hover:bg-slate-700/80 border border-slate-700/80 text-left font-medium text-xs sm:text-sm text-slate-200 transition-all flex items-start space-x-3 group";
+                    btn.onclick = () => handleTestAnswer(opt.isCorrect, btn, q, opt.text);
+                    btn.innerHTML = `
+                        <span class="w-6 h-6 rounded-lg bg-slate-800 text-slate-400 group-hover:bg-emerald-500 group-hover:text-slate-950 font-bold flex items-center justify-center shrink-0 text-xs">${optLabels[idx]}</span>
+                        <span class="pt-0.5 leading-relaxed">${opt.text}</span>
+                    `;
+                    container.appendChild(btn);
+                });
+
+                startTimer();
+            } else {
+                document.getElementById('cardQuestionText').innerText = q.question;
+                document.getElementById('cardAnswerText').innerText = q.correct;
+                document.getElementById('flashCardInner').classList.remove('flipped');
+                document.getElementById('cardEvaluationBtns').classList.add('opacity-50', 'pointer-events-none');
+                startTimer();
+            }
+        }
+
+        function handleTestAnswer(isCorrect, btnElement, qObj, chosenText) {
+            if (isAnswered) return;
+            isAnswered = true;
+            stopTimer();
+
+            const container = document.getElementById('optionsContainer');
+            container.querySelectorAll('button').forEach(b => b.disabled = true);
+
+            userAnswersLog.push({ question: qObj.question, correct: qObj.correct, userChoice: chosenText, isCorrect: isCorrect });
+
+            const banner = document.getElementById('feedbackBanner');
+            banner.classList.remove('hidden');
+
+            if (isCorrect) {
+                playSound('correct');
+                streak++;
+                correctAnswersCount++;
+                btnElement.classList.add('bg-emerald-500/20', 'border-emerald-500', 'text-emerald-300');
+
+                const pointsGained = 100 + (currentSecondsLeft * 10) + ((streak - 1) * 50);
+                score += pointsGained;
+
+                banner.className = "p-4 rounded-xl border flex items-center justify-between transition-all bg-emerald-950/80 border-emerald-500/50 text-emerald-300";
+                document.getElementById('feedbackIcon').className = "fa-solid fa-circle-check text-2xl text-emerald-400";
+                document.getElementById('feedbackTitle').innerText = `Tebrikler, Doğru! (+${pointsGained} Puan)`;
+                document.getElementById('feedbackDetail').innerText = streak > 1 ? `${streak}x Seri Yakaladınız!` : `Hızlı cevap bonusu eklendi.`;
+            } else {
+                playSound('wrong');
+                streak = 0;
+                btnElement.classList.add('bg-rose-500/20', 'border-rose-500', 'text-rose-300');
+
+                banner.className = "p-4 rounded-xl border flex items-center justify-between transition-all bg-rose-950/80 border-rose-500/50 text-rose-300";
+                document.getElementById('feedbackIcon').className = "fa-solid fa-circle-xmark text-2xl text-rose-400";
+                document.getElementById('feedbackTitle').innerText = "Yanlış Cevap!";
+                document.getElementById('feedbackDetail').innerText = `Doğru cevap: ${qObj.correct}`;
+            }
+
+            document.getElementById('currentScore').innerText = score;
+            document.getElementById('globalScoreText').innerText = `${score} Puan`;
+            document.getElementById('comboCount').innerText = streak;
+        }
+
+        function handleTimeout() {
+            if (isAnswered) return;
+            isAnswered = true;
+            playSound('wrong');
+            streak = 0;
+            document.getElementById('comboCount').innerText = 0;
+
+            const qObj = shuffledQuestions[currentQuestionIndex];
+            userAnswersLog.push({ question: qObj.question, correct: qObj.correct, userChoice: "Süre Doldu", isCorrect: false });
+
+            if (currentGameMode === 'test') {
+                document.getElementById('optionsContainer').querySelectorAll('button').forEach(b => b.disabled = true);
+                const banner = document.getElementById('feedbackBanner');
+                banner.classList.remove('hidden');
+                banner.className = "p-4 rounded-xl border flex items-center justify-between transition-all bg-rose-950/80 border-rose-500/50 text-rose-300";
+                document.getElementById('feedbackIcon').className = "fa-solid fa-clock text-2xl text-rose-400";
+                document.getElementById('feedbackTitle').innerText = "Süreniz Doldu!";
+                document.getElementById('feedbackDetail').innerText = `Doğru cevap: ${qObj.correct}`;
+            } else {
+                flipCard();
+            }
+        }
+
+        function flipCard() {
+            if (cardFlipped) return;
+            cardFlipped = true;
+            stopTimer();
+
+            document.getElementById('flashCardInner').classList.add('flipped');
+            document.getElementById('cardEvaluationBtns').classList.remove('opacity-50', 'pointer-events-none');
+        }
+
+        function usePassCard() {
+            if (passRights <= 0) return;
+            passRights--;
+            document.getElementById('passCountText').innerText = `${passRights} Pas`;
+            if (passRights <= 0) document.getElementById('passCardBtn').disabled = true;
+            nextQuestion();
+        }
+
+        function rateCard(isKnown) {
+            const qObj = shuffledQuestions[currentQuestionIndex];
+            stopTimer();
+
+            if (isKnown) {
+                playSound('correct');
+                score += 100;
+                correctAnswersCount++;
+            } else {
+                playSound('wrong');
+            }
+
+            userAnswersLog.push({ question: qObj.question, correct: qObj.correct, userChoice: isKnown ? "Bildim" : "Bilemedim", isCorrect: isKnown });
+            document.getElementById('currentScore').innerText = score;
+            document.getElementById('globalScoreText').innerText = `${score} Puan`;
+            nextQuestion();
+        }
+
+        function nextQuestion() {
+            stopTimer();
+            currentQuestionIndex++;
+            loadQuestion();
+        }
+
+        function endGame() {
+            stopTimer();
+            document.getElementById('gameplayScreen').classList.add('hidden');
+            document.getElementById('resultScreen').classList.remove('hidden');
+
+            const total = shuffledQuestions.length;
+            const pct = Math.round((correctAnswersCount / total) * 100);
+
+            document.getElementById('resultPlayerName').innerText = playerName;
+            document.getElementById('finalScore').innerText = score;
+            document.getElementById('finalCorrect').innerText = `${correctAnswersCount} / ${total}`;
+            document.getElementById('finalAccuracy').innerText = `%${pct}`;
+
+            saveScoreToLeaderboard(playerName, score, correctAnswersCount, total, currentGameMode);
+
+            try { confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } }); } catch (e) {}
+            renderReviewSection();
+        }
+
+        function renderReviewSection() {
+            const container = document.getElementById('reviewContainer');
+            container.innerHTML = '';
+
+            userAnswersLog.forEach((item, idx) => {
+                const div = document.createElement('div');
+                div.className = `p-3 rounded-lg border text-xs space-y-1 ${item.isCorrect ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-200' : 'bg-rose-950/40 border-rose-500/30 text-rose-200'}`;
+                div.innerHTML = `
+                    <div class="font-bold text-white">${idx + 1}. ${item.question}</div>
+                    <div><span class="opacity-75">Doğru Cevap:</span> ${item.correct}</div>
+                    <div><span class="opacity-75">Seçiminiz:</span> <span class="${item.isCorrect ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}">${item.userChoice}</span></div>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        function toggleAnswerReview() {
+            document.getElementById('reviewContainer').classList.toggle('hidden');
+        }
+
+        function resetToHome() {
+            stopTimer();
+            document.getElementById('gameplayScreen').classList.add('hidden');
+            document.getElementById('resultScreen').classList.add('hidden');
+            document.getElementById('welcomeScreen').classList.remove('hidden');
+        }
+
+        function restartGame() {
+            startGame(currentGameMode);
+        }
+
+        function confirmExit() {
+            if (confirm("Yarışmadan çıkmak istediğinize emin misiniz?")) {
+                resetToHome();
+            }
+        }
+    </script>
+</body>
+</html>
